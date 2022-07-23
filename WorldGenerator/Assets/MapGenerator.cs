@@ -1,6 +1,8 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using System.Threading;
+using System;
 
 public class MapGenerator : MonoBehaviour
 {
@@ -25,6 +27,8 @@ public const int mapChunkSize = 241;
  
  public TerrainType[] regions;
 
+Queue<MapThreadInfo<MapData>> mapDataThreadInfoQueue = new Queue<MapThreadInfo<MapData>>();
+
  public void DrawMapInEditor(){
 	 MapData mapData = GenerateMapData ();
 	  MapDisplay display = FindObjectOfType<MapDisplay>();
@@ -40,6 +44,28 @@ public const int mapChunkSize = 241;
 	 
  }
 
+public void RequestMapData(Action<MapData> callback){
+	ThreadStart threadStart = delegate {
+		MapDataThread (callback);
+	};
+
+	new Thread (threadStart).Start ();
+}
+
+void MapDataThread(Action<MapData> callback){
+      MapData mapData = GenerateMapData ();
+	  lock(mapDataThreadInfoQueue){
+	  mapDataThreadInfoQueue.Enqueue (new MapThreadInfo<MapData>(callback, mapData));
+	  }
+}
+void Update (){
+	if (mapDataThreadInfoQueue.Count > 0) {
+		for (int i = 0; i < mapDataThreadInfoQueue.Count; i ++){
+			MapThreadInfo<MapData> threadInfo = mapDataThreadInfoQueue.Dequeue();
+			threadInfo.callback(threadInfo.parameter);
+		}
+	}
+}
  MapData GenerateMapData(){
 	 float[,] noiseMap = Noise.GenerateNoiseMap (mapChunkSize,mapChunkSize, seed,noiseScale, octaves, persistance, lacunarity, offset);
 
@@ -67,6 +93,19 @@ public const int mapChunkSize = 241;
 		  octaves = 0;
 	  }
   }
+
+struct MapThreadInfo<T>{
+	public readonly Action<T> callback;
+	public readonly T parameter;
+
+	public MapThreadInfo (Action<T> callback, T parameter)
+	{
+		this.callback = callback;
+		this.parameter = parameter;
+	}
+	
+}
+
 }
 [System.Serializable]
 public struct TerrainType {
@@ -77,8 +116,8 @@ public struct TerrainType {
 }
 
 public struct MapData {
-	public float[,] heightMap;
-	public Color[] colourMap;
+	public readonly float[,] heightMap;
+	public readonly Color[] colourMap;
 
 	public MapData (float[,] heightMap, Color[] colourMap)
 	{
